@@ -159,17 +159,28 @@ def install_k3s_on_primary_node(ip_address, username, password):
 
     # K3s install command with embedded etcd for HA
     install_command = "curl -sfL https://get.k3s.io | sh -s - server --cluster-init --write-kubeconfig-mode 644"
-
     stdin, stdout, stderr = client.exec_command(install_command)
     print(stdout.read().decode())
     print(stderr.read().decode())
+
+    # Retrieve the K3s token
+    token_command = "sudo cat /var/lib/rancher/k3s/server/node-token"
+    stdin, stdout, stderr = client.exec_command(token_command)
+    token = stdout.read().decode().strip()
+    error = stderr.read().decode().strip()
+
     client.close()
+
+    if error:
+        raise Exception(f"Error retrieving K3s token: {error}")
+
+    return token
 
 @app.post("/setup-k3s-primary")
 async def setup_k3s_primary(ip_address: str, username: str, password: str):
     try:
-        install_k3s_on_primary_node(ip_address, username, password)
-        return {"status": "K3s installed on primary node"}
+        token = install_k3s_on_primary_node(ip_address, username, password)
+        return {"status": "K3s installed on primary node", "token": token}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to set up K3s on primary node: {str(e)}")
 
@@ -227,6 +238,7 @@ def add_helm_repo_and_update(ip_address, username, password):
     helm_repo_command = """
     helm repo add cnpg https://cloudnative-pg.github.io/charts
     helm repo update
+    helm install my-postgresql cnpg/cloudnative-pg --namespace default --create-namespace
     """
 
     stdin, stdout, stderr = client.exec_command(helm_repo_command)
@@ -234,7 +246,7 @@ def add_helm_repo_and_update(ip_address, username, password):
     print(stderr.read().decode())
     client.close()
 
-@app.post("/add-helm-repo")
+@app.post("/add-helm-repo-cloudnativePG")
 async def add_helm_repo(ip_address: str, username: str, password: str):
     try:
         add_helm_repo_and_update(ip_address, username, password)
@@ -249,32 +261,32 @@ async def add_helm_repo(ip_address: str, username: str, password: str):
 #     return {"status": "K3s deployment started"}
 
 # Endpoint to deploy CloudNativePG
-def deploy_cloudnativepg(ip_address, username, password):
-    client = paramiko.SSHClient()
-    client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-    client.connect(ip_address, username=username, password=password)
+# def deploy_cloudnativepg(ip_address, username, password):
+#     client = paramiko.SSHClient()
+#     client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+#     client.connect(ip_address, username=username, password=password)
 
-    # Install CloudNativePG Helm chart
-    install_cnpg_command = """
-    helm install my-postgresql cnpg/cloudnative-pg --namespace default --create-namespace
-    """
+#     # Install CloudNativePG Helm chart
+#     install_cnpg_command = """
+#     helm install my-postgresql cnpg/cloudnative-pg --namespace default --create-namespace
+#     """
 
-    stdin, stdout, stderr = client.exec_command(install_cnpg_command)
-    stdout_result = stdout.read().decode()
-    stderr_result = stderr.read().decode()
+#     stdin, stdout, stderr = client.exec_command(install_cnpg_command)
+#     stdout_result = stdout.read().decode()
+#     stderr_result = stderr.read().decode()
 
-    if stderr_result:
-        print("Error during deployment:", stderr_result)
-    else:
-        print("Deployment output:", stdout_result)
+#     if stderr_result:
+#         print("Error during deployment:", stderr_result)
+#     else:
+#         print("Deployment output:", stdout_result)
 
-    client.close()
+#     client.close()
 
-@app.post("/deploy-cloudnativepg")
-async def deploy_cloudnativepg_endpoint(ip_address: str, username: str, password: str):
-    try:
-        deploy_cloudnativepg(ip_address, username, password)
-        return {"status": "CloudNativePG deployed"}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to deploy CloudNativePG: {str(e)}")
+# @app.post("/deploy-cloudnativepg")
+# async def deploy_cloudnativepg_endpoint(ip_address: str, username: str, password: str):
+#     try:
+#         deploy_cloudnativepg(ip_address, username, password)
+#         return {"status": "CloudNativePG deployed"}
+#     except Exception as e:
+#         raise HTTPException(status_code=500, detail=f"Failed to deploy CloudNativePG: {str(e)}")
 
