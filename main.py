@@ -3,6 +3,8 @@ from fastapi import FastAPI, HTTPException
 import subprocess
 import paramiko
 from azure_config import compute_client, resource_client, network_client, subscription_id
+import yaml
+from pathlib import Path 
 
 
 app = FastAPI()
@@ -46,6 +48,17 @@ async def create_vms(vm_count: int, resource_group: str, location: str, vm_size:
                     "destination_address_prefix": "*",
                     "access": "Allow",
                     "priority": 200,
+                    "direction": "Inbound"
+                },
+                {
+                    "name": "AllowPG",
+                    "protocol": "Tcp",
+                    "source_port_range": "*",
+                    "destination_port_range": "30000",
+                    "source_address_prefix": "*",
+                    "destination_address_prefix": "*",
+                    "access": "Allow",
+                    "priority": 210,
                     "direction": "Inbound"
                 },
             ]
@@ -229,36 +242,32 @@ async def install_helm(ip_address: str, username: str, password: str):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to install Helm on node: {str(e)}")
 
-def add_helm_repo_and_update(ip_address, username, password):
-    client = paramiko.SSHClient()
-    client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-    client.connect(ip_address, username=username, password=password)
+# def add_helm_repo_and_update(ip_address, username, password):
+#     client = paramiko.SSHClient()
+#     client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+#     client.connect(ip_address, username=username, password=password)
 
-    # Add and update CloudNativePG Helm repository
-    helm_repo_command = """
-    helm repo add cnpg https://cloudnative-pg.github.io/charts
-    helm repo update
-    helm install my-postgresql cnpg/cloudnative-pg --namespace default --create-namespace
-    """
+#     # Add and update CloudNativePG Helm repository
+#     helm_repo_command = """
+#     helm repo add cnpg https://cloudnative-pg.github.io/charts
+#     helm repo update
+#     helm install my-postgresql cnpg/cloudnative-pg --namespace default --create-namespace
+#     """
 
-    stdin, stdout, stderr = client.exec_command(helm_repo_command)
-    print(stdout.read().decode())
-    print(stderr.read().decode())
-    client.close()
+#     stdin, stdout, stderr = client.exec_command(helm_repo_command)
+#     print(stdout.read().decode())
+#     print(stderr.read().decode())
+#     client.close()
 
-@app.post("/add-helm-repo-cloudnativePG")
-async def add_helm_repo(ip_address: str, username: str, password: str):
-    try:
-        add_helm_repo_and_update(ip_address, username, password)
-        return {"status": "Helm repo added and updated"}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to add Helm repo: {str(e)}")
+# @app.post("/add-helm-repo-cloudnativePG")
+# async def add_helm_repo(ip_address: str, username: str, password: str):
+#     try:
+#         add_helm_repo_and_update(ip_address, username, password)
+#         return {"status": "Helm repo added and updated"}
+#     except Exception as e:
+#         raise HTTPException(status_code=500, detail=f"Failed to add Helm repo: {str(e)}")
 
-# # Endpoint to deploy K3s on the created VMs
-# @app.post("/deploy-k3s")
-# async def deploy_k3s():
-#     # Code to install K3s and configure HA
-#     return {"status": "K3s deployment started"}
+
 
 # Endpoint to deploy CloudNativePG
 # def deploy_cloudnativepg(ip_address, username, password):
@@ -290,3 +299,135 @@ async def add_helm_repo(ip_address: str, username: str, password: str):
 #     except Exception as e:
 #         raise HTTPException(status_code=500, detail=f"Failed to deploy CloudNativePG: {str(e)}")
 
+@app.post("/Clone-helm-chart/")
+def clone_helm_chart(ip_address: str, username: str, password: str):
+    try:
+        # Establish SSH connection
+        client = paramiko.SSHClient()
+        client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        client.connect(ip_address, username=username, password=password)
+
+        # Commands to execute
+        commands = [
+            "git clone https://github.com/Hemanth097/postgre-chart",           
+        ]
+
+        # Execute each command and capture the output
+        for command in commands:
+            stdin, stdout, stderr = client.exec_command(command)
+            stdout_output = stdout.read().decode()
+            stderr_output = stderr.read().decode()
+
+            # Print outputs in the console
+            print(f"Command: {command}")
+            print(f"STDOUT:\n{stdout_output}")
+            print(f"STDERR:\n{stderr_output}")
+
+            if stderr_output:
+                raise Exception(f"Error executing {command}: {stderr_output}")
+
+        # Close the connection
+        client.close()  
+
+        return {"status": "success", "message": "Commands executed successfully."}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/deploy-postgres/")
+def clone_helm_chart(ip_address: str, username: str, password: str):
+    try:
+        # Establish SSH connection
+        client = paramiko.SSHClient()
+        client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        client.connect(ip_address, username=username, password=password)
+
+        release_name = "postgres-chart"
+        helm_chart_path = "./postgre-chart/postgres-chart-0.1.0.tgz"
+        helm_command = f"helm install {release_name} {helm_chart_path}"
+
+        # Commands to execute
+        commands = [
+            "export KUBECONFIG=/etc/rancher/k3s/k3s.yaml",      
+            helm_command,     
+        ]
+
+        
+        
+        for command in commands:
+            stdin, stdout, stderr = client.exec_command(command)
+            stdout_output = stdout.read().decode()
+            stderr_output = stderr.read().decode()
+
+            # Print outputs in the console
+            print(f"Command: {command}")
+            print(f"STDOUT:\n{stdout_output}")
+            print(f"STDERR:\n{stderr_output}")
+
+            if stderr_output:
+                raise Exception(f"Error executing {command}: {stderr_output}")
+
+        # Close the connection
+        client.close()  
+
+        return {"status": "success", "message": "Commands executed successfully."}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# @app.post("/deploy_postgres/")
+# async def deploy_postgres(ip_address: str, username: str, password: str, user_name : str, db_name : str, db_password :str, storage_size :str, nodeport :str):
+#     try:
+#         # Establish SSH connection
+#         client = paramiko.SSHClient()
+#         client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+#         client.connect(ip_address, username=username, password=password)
+
+#         values = {
+#             "postgres": { 
+#                 "user": user_name,
+#                 "password": db_password,
+#                 "db": db_name,
+#                 "storage": {"size": storage_size},
+#                 "nodePort": nodeport,
+#             }
+#         }
+
+#         values_path = Path("temp-values.yaml")
+#         with open(values_path, "w") as file:
+#             yaml.dump(values, file, default_flow_style=False)
+        
+#         scp_command = f"scp temp-values.yaml {username}@{ip_address}:/tmp/temp-values.yaml"
+#         subprocess.run(scp_command, shell=True, check=True)
+        
+#         release_name = "postgres-chart"
+#         helm_chart_path = "./postgre-chart/postgres-chart-0.1.0.tgz"
+
+#         helm_command = f"helm install {release_name} {helm_chart_path} --values /tmp/temp-values.yaml"
+
+#         # Commands to execute
+#         commands = [
+#             "export KUBECONFIG=/etc/rancher/k3s/k3s.yaml",
+#             helm_command,           
+#         ]
+
+#         # Execute each command and capture the output
+#         for command in commands:
+#             stdin, stdout, stderr = client.exec_command(command)
+#             stdout_output = stdout.read().decode()
+#             stderr_output = stderr.read().decode()
+
+#             # Print outputs in the console
+#             print(f"Command: {command}")
+#             print(f"STDOUT:\n{stdout_output}")
+#             print(f"STDERR:\n{stderr_output}")
+
+#             if stderr_output:
+#                 raise Exception(f"Error executing {command}: {stderr_output}")
+
+#         # Close the connection
+#         client.close()  
+
+#         return {"status": "success", "message": "Commands executed successfully."}
+#     except Exception as e:
+#         raise HTTPException(status_code=500, detail=str(e))
+    
