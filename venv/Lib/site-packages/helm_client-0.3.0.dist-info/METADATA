@@ -1,0 +1,56 @@
+Metadata-Version: 2.1
+Name: helm-client
+Version: 0.3.0
+Summary: Helm client
+Author: Attila Kobor
+Author-email: akobor@kx.com
+Requires-Python: >=3.8,<4.0
+Classifier: Development Status :: 4 - Beta
+Classifier: Framework :: Pydantic
+Classifier: Intended Audience :: Developers
+Classifier: Programming Language :: Python :: 3
+Classifier: Programming Language :: Python :: 3.8
+Classifier: Programming Language :: Python :: 3.9
+Classifier: Programming Language :: Python :: 3.10
+Classifier: Programming Language :: Python :: 3.11
+Classifier: Programming Language :: Python :: 3.12
+Requires-Dist: packaging (>=23.0,<24.0)
+Requires-Dist: pydantic (>=2.5.2,<3.0.0)
+Requires-Dist: pyyaml (>=6.0,<7.0)
+Requires-Dist: requests (>=2.28,<3.0)
+Description-Content-Type: text/markdown
+
+# helm-client
+
+This project aims to provide an easy interface over helm-cli.
+
+Basic syntax is very similar to helm cli.
+
+`helm.repo.list()` is the same as `helm repo list`
+
+## Example Usage
+
+```python
+import helm
+from helm.models import HelmRepo
+
+repositories: List[HelmRepo] = helm.repo.list()
+for repo in repositories:
+    print(repo.name)
+```
+
+## Models
+
+We aim to provide pydantic models for all reasonable use-cases.
+
+## Arguments
+
+The default implementation of the commands can handle keyword arguments, like `namespace=something` and transforms them to correct cli arguments.
+
+- `--arg-name value` is the same as `arg_name=value`
+- `--boolarg` is the same as `boolarg=True`
+
+## Work in progress
+
+Expect breaking changes
+
