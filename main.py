@@ -93,11 +93,13 @@ async def create_vms(vm_count: int, resource_group: str, location: str, vm_size:
         for i in range(vm_count):
             vm_name = f"myVM-{i+1}"
 
-            # Create a Public IP
+            # Create a unique Public IP with a DNS label for each VM
+            dns_label = f"vm-dns-{i+1}-{resource_group.lower()}"
             public_ip_params = {
                 "location": location,
                 "sku": {"name": "Standard"},
-                "public_ip_allocation_method": "Static"
+                "public_ip_allocation_method": "Static",
+                "dns_settings": {"domain_name_label": dns_label}  # DNS settings added here
             }
             public_ip = network_client.public_ip_addresses.begin_create_or_update(
                 resource_group,
@@ -105,7 +107,10 @@ async def create_vms(vm_count: int, resource_group: str, location: str, vm_size:
                 public_ip_params
             ).result()
 
-            # Create a Network Interface
+            # Retrieve the fully qualified domain name (FQDN) after creation
+            fqdn = public_ip.dns_settings.fqdn
+
+            # Create unique Network Interface with NSG for each VM
             nic_name = f"myNic-{i+1}"
             nic_params = {
                 "location": location,
@@ -149,19 +154,8 @@ async def create_vms(vm_count: int, resource_group: str, location: str, vm_size:
                 vm_params
             ).result()
 
-            # Create DNS Record
-            dns_record_name = f"vm-{i+1}"
-            dns_record_params = {
-                "ttl": 300,  # Time-to-live in seconds
-                "a_records": [{"ipv4_address": public_ip.ip_address}]
-            }
-            dns_client.record_sets.create_or_update(
-                resource_group_name=resource_group,
-                zone_name=dns_zone_name,
-                relative_record_set_name=dns_record_name,
-                record_type="A",
-                parameters=dns_record_params
-            )
+            # Store the VM name, public IP, and FQDN
+            vm_ips.append({"vm_name": vm_name, "public_ip": public_ip.ip_address, "dns_name": fqdn})
 
             fqdn = f"{dns_record_name}.{dns_zone_name}"
             vm_details.append({
