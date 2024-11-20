@@ -323,8 +323,8 @@ def clone_helm_chart(ip_address: str, username: str, password: str):
             print(f"STDOUT:\n{stdout_output}")
             print(f"STDERR:\n{stderr_output}")
 
-            if stderr_output:
-                raise Exception(f"Error executing {command}: {stderr_output}")
+            # if stderr_output:
+            #     raise Exception(f"Error executing {command}: {stderr_output}")
 
         # Close the connection
         client.close()  
@@ -334,8 +334,24 @@ def clone_helm_chart(ip_address: str, username: str, password: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/deploy-postgres/")
-def clone_helm_chart(ip_address: str, username: str, password: str):
+async def deploy_postgres(
+    ip_address: str,
+    username: str,
+    password: str,
+    user_name: str,
+    db_name: str,
+    db_password: str,
+    storage_size: str,
+    nodeport: str,
+    replica_count: int = 1,
+    autoscaling_enabled: bool = False,
+    min_replicas: int = 1,
+    max_replicas: int = 3,
+    cpu_utilization: int = 80,
+):
     try:
+        
+
         # Establish SSH connection
         client = paramiko.SSHClient()
         client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
@@ -343,33 +359,44 @@ def clone_helm_chart(ip_address: str, username: str, password: str):
 
         release_name = "postgres-chart"
         helm_chart_path = "./postgre-chart/postgres-chart-0.1.0.tgz"
-        helm_command = f"helm install {release_name} {helm_chart_path}"
 
-        # Commands to execute
-        commands = [
-            "export KUBECONFIG=/etc/rancher/k3s/k3s.yaml",      
-            helm_command,     
-        ]
+        # Build Helm command with --set for dynamic values
+        helm_command = (
+            f"helm install {release_name} {helm_chart_path} "
+            f"--set replicaCount={replica_count} "
+            f"--set postgres.user={user_name} "
+            f"--set postgres.password={db_password} "
+            f"--set postgres.db={db_name} "
+            f"--set postgres.storage.size={storage_size} "
+            f"--set postgres.nodePort={nodeport} "
+            f"--set service.type=NodePort "
+            f"--set autoscaling.enabled={str(autoscaling_enabled).lower()} "
+            f"--set autoscaling.minReplicas={min_replicas} "
+            f"--set autoscaling.maxReplicas={max_replicas} "
+            f"--set autoscaling.targetCPUUtilizationPercentage={cpu_utilization}"
+        )
 
-        
-        
-        for command in commands:
-            stdin, stdout, stderr = client.exec_command(command)
-            stdout_output = stdout.read().decode()
-            stderr_output = stderr.read().decode()
+        # Single command to set KUBECONFIG and execute Helm
+        command = (
+            "export KUBECONFIG=/etc/rancher/k3s/k3s.yaml && " + helm_command
+        )
 
-            # Print outputs in the console
-            print(f"Command: {command}")
-            print(f"STDOUT:\n{stdout_output}")
-            print(f"STDERR:\n{stderr_output}")
+        stdin, stdout, stderr = client.exec_command(command)
+        stdout_output = stdout.read().decode()
+        stderr_output = stderr.read().decode()
 
-            if stderr_output:
-                raise Exception(f"Error executing {command}: {stderr_output}")
+        # Log outputs
+        print(f"Command: {command}")
+        print(f"STDOUT:\n{stdout_output}")
+        print(f"STDERR:\n{stderr_output}")
+
+        # if stderr_output:
+        #     raise Exception(f"Error executing {command}: {stderr_output}")
 
         # Close the connection
-        client.close()  
+        client.close()
 
-        return {"status": "success", "message": "Commands executed successfully."}
+        return {"status": "success", "message": "PostgreSQL deployed successfully."}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -431,3 +458,43 @@ def clone_helm_chart(ip_address: str, username: str, password: str):
 #     except Exception as e:
 #         raise HTTPException(status_code=500, detail=str(e))
     
+def execute_ssh_command(ip: str, username: str, password: str, commands: list):
+    """Execute commands on a remote server via SSH."""
+    try:
+        ssh = paramiko.SSHClient()
+        ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        ssh.connect(hostname=ip, username=username, password=password)
+        for command in commands:
+            stdin, stdout, stderr = ssh.exec_command("export KUBECONFIG=/etc/rancher/k3s/k3s.yaml && "+ command)
+            stdout.channel.recv_exit_status()  # Wait for command to finish
+            output = stdout.read().decode()
+            error = stderr.read().decode()
+            print("stdout\n", output)
+            print("error\n",error)
+            # if error:
+            #     raise Exception(f"Error executing command: {error}")
+        ssh.close()
+        return output
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/install-monitoring/")
+def install_monitoring(ip: str, username: str, password: str):
+    """Install Prometheus and Grafana on the remote VM."""
+    commands = [
+        "helm repo add prometheus-community https://prometheus-community.github.io/helm-charts && helm repo update",
+        "helm repo add grafana https://grafana.github.io/helm-charts && helm repo update",
+        # Install Prometheus
+        "helm install prometheus prometheus-community/kube-prometheus-stack --namespace monitoring --create-namespace",
+        # Install Grafana
+        "helm install grafana grafana/grafana --namespace monitoring",
+        # Change Grafana to NodePort
+        "kubectl -n monitoring patch svc grafana --type='json' -p '[{\"op\":\"replace\",\"path\":\"/spec/type\",\"value\":\"NodePort\"}]'"
+    ]
+    
+    # Execute the commands on the remote VM
+    try:
+        result = execute_ssh_command(ip, username, password, commands)
+        return {"message": "Prometheus and Grafana installed successfully.", "details": result}
+    except HTTPException as e:
+        return {"error": e.detail}

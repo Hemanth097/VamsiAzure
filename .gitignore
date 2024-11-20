@@ -3,3 +3,5 @@ __pycache__
 venv
 docs.txt
 loadbalancer-service.yaml
+temp-values.yaml
+postgres-chart-0.1.0.tgz
