@@ -1,7 +1,0 @@
-postgres:
-  db: mydb
-  nodePort: '30000'
-  password: password
-  storage:
-    size: 1Gi
-  user: user
