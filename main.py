@@ -93,17 +93,22 @@ async def create_vms(vm_count: int, resource_group: str, location: str, vm_size:
         for i in range(vm_count):
             vm_name = f"myVM-{i+1}"
 
-            # Create a unique Public IP for each VM
+            # Create a unique Public IP with a DNS label for each VM
+            dns_label = f"vm-dns-{i+1}-{resource_group.lower()}"
             public_ip_params = {
                 "location": location,
                 "sku": {"name": "Standard"},
-                "public_ip_allocation_method": "Static"
+                "public_ip_allocation_method": "Static",
+                "dns_settings": {"domain_name_label": dns_label}  # DNS settings added here
             }
             public_ip = network_client.public_ip_addresses.begin_create_or_update(
                 resource_group,
                 f"myPublicIP-{i+1}",
                 public_ip_params
             ).result()
+
+            # Retrieve the fully qualified domain name (FQDN) after creation
+            fqdn = public_ip.dns_settings.fqdn
 
             # Create unique Network Interface with NSG for each VM
             nic_name = f"myNic-{i+1}"
@@ -150,12 +155,8 @@ async def create_vms(vm_count: int, resource_group: str, location: str, vm_size:
                 vm_params
             ).result()
 
-            # Retrieve and store the public IP address
-            public_ip_info = network_client.public_ip_addresses.get(
-                resource_group,
-                f"myPublicIP-{i+1}"
-            )
-            vm_ips.append({"vm_name": vm_name, "public_ip": public_ip_info.ip_address})
+            # Store the VM name, public IP, and FQDN
+            vm_ips.append({"vm_name": vm_name, "public_ip": public_ip.ip_address, "dns_name": fqdn})
 
         return {"status": f"{vm_count} VMs created successfully with NSG and open ports", "vm_ips": vm_ips}
     except Exception as e:
