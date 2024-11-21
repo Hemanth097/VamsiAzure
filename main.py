@@ -2,7 +2,7 @@
 from fastapi import FastAPI, HTTPException
 import subprocess
 import paramiko
-from azure_config import compute_client, resource_client, network_client, subscription_id, dns_client
+from azure_config import compute_client, resource_client, network_client, subscription_id
 import yaml
 from pathlib import Path 
 
@@ -16,7 +16,7 @@ async def root():
 # Endpoint to trigger VM creation
 # centralindia myResourceGroup Standard_B1s azureuser MyPassword123
 @app.post("/create-vms")
-async def create_vms(vm_count: int, resource_group: str, location: str, vm_size: str, username: str, password: str, dns_zone_name: str):
+async def create_vms(vm_count: int, resource_group: str, location: str, vm_size: str, username: str, password: str):
     try:
         # Step 1: Create Resource Group
         resource_client.resource_groups.create_or_update(
@@ -88,8 +88,8 @@ async def create_vms(vm_count: int, resource_group: str, location: str, vm_size:
             subnet_params
         ).result()
 
-        # Step 4: Create VMs with Public IPs, NSG, and DNS Records
-        vm_details = []
+        # Step 4: Create VMs with unique Network Interfaces, Public IPs, and NSG
+        vm_ips = []
         for i in range(vm_count):
             vm_name = f"myVM-{i+1}"
 
@@ -127,7 +127,7 @@ async def create_vms(vm_count: int, resource_group: str, location: str, vm_size:
                 nic_params
             ).result()
 
-            # Create the VM
+            # Step 5: Create the VM with the unique NIC and Public IP
             vm_params = {
                 "location": location,
                 "hardware_profile": {"vm_size": vm_size},
@@ -148,6 +148,7 @@ async def create_vms(vm_count: int, resource_group: str, location: str, vm_size:
                     "network_interfaces": [{"id": nic.id}]
                 }
             }
+
             compute_client.virtual_machines.begin_create_or_update(
                 resource_group,
                 vm_name,
@@ -157,16 +158,10 @@ async def create_vms(vm_count: int, resource_group: str, location: str, vm_size:
             # Store the VM name, public IP, and FQDN
             vm_ips.append({"vm_name": vm_name, "public_ip": public_ip.ip_address, "dns_name": fqdn})
 
-            fqdn = f"{dns_record_name}.{dns_zone_name}"
-            vm_details.append({
-                "vm_name": vm_name,
-                "public_ip": public_ip.ip_address,
-                "dns_name": fqdn
-            })
-
-        return {"status": f"{vm_count} VMs created successfully with DNS records", "vm_details": vm_details}
+        return {"status": f"{vm_count} VMs created successfully with NSG and open ports", "vm_ips": vm_ips}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to create VMs: {str(e)}")
+
 
 
     
