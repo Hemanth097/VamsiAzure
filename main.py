@@ -459,44 +459,44 @@ async def deploy_postgres(
 #     except Exception as e:
 #         raise HTTPException(status_code=500, detail=str(e))
     
-def execute_ssh_command(ip: str, username: str, password: str, commands: list):
-    """Execute commands on a remote server via SSH."""
-    try:
-        ssh = paramiko.SSHClient()
-        ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-        ssh.connect(hostname=ip, username=username, password=password)
-        for command in commands:
-            stdin, stdout, stderr = ssh.exec_command("export KUBECONFIG=/etc/rancher/k3s/k3s.yaml && "+ command)
-            stdout.channel.recv_exit_status()  # Wait for command to finish
-            output = stdout.read().decode()
-            error = stderr.read().decode()
-            print("stdout\n", output)
-            print("error\n",error)
-            # if error:
-            #     raise Exception(f"Error executing command: {error}")
-        ssh.close()
-        return output
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    def execute_ssh_command(ip: str, username: str, password: str, commands: list):
+        """Execute commands on a remote server via SSH."""
+        try:
+            ssh = paramiko.SSHClient()
+            ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+            ssh.connect(hostname=ip, username=username, password=password)
+            for command in commands:
+                stdin, stdout, stderr = ssh.exec_command("export KUBECONFIG=/etc/rancher/k3s/k3s.yaml && "+ command)
+                stdout.channel.recv_exit_status()  # Wait for command to finish
+                output = stdout.read().decode()
+                error = stderr.read().decode()
+                print("stdout\n", output)
+                print("error\n",error)
+                # if error:
+                #     raise Exception(f"Error executing command: {error}")
+            ssh.close()
+            return output
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/install-monitoring/")
-def install_monitoring(ip: str, username: str, password: str):
-    """Install Prometheus and Grafana on the remote VM."""
-    commands = [
-        "helm repo add prometheus-community https://prometheus-community.github.io/helm-charts && helm repo update",
-        "helm repo add grafana https://grafana.github.io/helm-charts && helm repo update",
-        # Install Prometheus
-        "helm install prometheus prometheus-community/kube-prometheus-stack --namespace monitoring --create-namespace",
-        # Install Grafana
-        "helm install grafana grafana/grafana --namespace monitoring",
-        # Change Grafana to NodePort
-        "kubectl -n monitoring patch svc grafana --type='json' -p '[{\"op\":\"replace\",\"path\":\"/spec/type\",\"value\":\"NodePort\"}]'"
-    ]
-    
-    # Execute the commands on the remote VM
-    try:
-        result = execute_ssh_command(ip, username, password, commands)
-        return {"message": "Prometheus and Grafana installed successfully.", "details": result}
-    except HTTPException as e:
-        return {"error": e.detail}
-    #
+    @app.post("/install-monitoring/")
+    def install_monitoring(ip: str, username: str, password: str):
+        """Install Prometheus and Grafana on the remote VM."""
+        commands = [
+            "helm repo add prometheus-community https://prometheus-community.github.io/helm-charts && helm repo update",
+            "helm repo add grafana https://grafana.github.io/helm-charts && helm repo update",
+            # Install Prometheus
+            "helm install prometheus prometheus-community/kube-prometheus-stack --namespace monitoring --create-namespace",
+            # Install Grafana
+            "helm install grafana grafana/grafana --namespace monitoring",
+            # Change Grafana to NodePort
+            "kubectl -n monitoring patch svc grafana --type='json' -p '[{\"op\":\"replace\",\"path\":\"/spec/type\",\"value\":\"NodePort\"}]'"
+        ]
+        
+        # Execute the commands on the remote VM
+        try:
+            result = execute_ssh_command(ip, username, password, commands)
+            return {"message": "Prometheus and Grafana installed successfully.", "details": result}
+        except HTTPException as e:
+            return {"error": e.detail}
+        #
