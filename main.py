@@ -498,3 +498,4 @@ def install_monitoring(ip: str, username: str, password: str):
         return {"message": "Prometheus and Grafana installed successfully.", "details": result}
     except HTTPException as e:
         return {"error": e.detail}
+    #
