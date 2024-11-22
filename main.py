@@ -3,7 +3,6 @@ from fastapi import FastAPI, HTTPException
 import subprocess
 import paramiko
 from azure_config import compute_client, resource_client, network_client, subscription_id
-import yaml
 from pathlib import Path 
 
 
