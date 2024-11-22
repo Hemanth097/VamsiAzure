@@ -1,10 +1,10 @@
 # main.py
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Depends
 import subprocess
 import paramiko
 from azure_config import compute_client, resource_client, network_client, subscription_id
-import yaml
 from pathlib import Path 
+from models import ipinput, vmcreation, joinNode, deploypg
 
 
 app = FastAPI()
@@ -13,20 +13,19 @@ app = FastAPI()
 async def root():
     return {"message": "K3s Cluster Setup API"}
 
-# Endpoint to trigger VM creation
-# centralindia myResourceGroup Standard_B1s azureuser MyPassword123
+# Creating VM with NSG, IP, DNS
 @app.post("/create-vms")
-async def create_vms(vm_count: int, resource_group: str, location: str, vm_size: str, username: str, password: str):
+async def create_vms(vm = Depends(vmcreation)):
     try:
-        # Step 1: Create Resource Group
+        # Creating Resource Group
         resource_client.resource_groups.create_or_update(
-            resource_group,
-            {"location": location}
+            vm.rg,
+            {"location": vm.location}
         )
 
-        # Step 2: Create Network Security Group (NSG) with necessary inbound rules
+        # Create Network Security Group (NSG) with inbound rules
         nsg_params = {
-            "location": location,
+            "location": vm.location,
             "security_rules": [
                 {
                     "name": "AllowSSH",
@@ -64,56 +63,56 @@ async def create_vms(vm_count: int, resource_group: str, location: str, vm_size:
             ]
         }
         nsg = network_client.network_security_groups.begin_create_or_update(
-            resource_group,
+            vm.rg,
             "myNSG",
             nsg_params
         ).result()
 
-        # Step 3: Create Virtual Network and Subnet
+        # Create Virtual Network and Subnet
         network_params = {
-            "location": location,
+            "location": vm.location,
             "address_space": {"address_prefixes": ["10.0.0.0/16"]}
         }
         network_client.virtual_networks.begin_create_or_update(
-            resource_group,
+            vm.rg,
             "myVnet",
             network_params
         ).result()
 
         subnet_params = {"address_prefix": "10.0.0.0/24"}
         subnet = network_client.subnets.begin_create_or_update(
-            resource_group,
+            vm.rg,
             "myVnet",
             "mySubnet",
             subnet_params
         ).result()
 
-        # Step 4: Create VMs with unique Network Interfaces, Public IPs, and NSG
+        # Create VMs with unique Network Interfaces, Public IPs, and NSG
         vm_ips = []
-        for i in range(vm_count):
+        for i in range(vm.vm_count):
             vm_name = f"myVM-{i+1}"
 
             # Create a unique Public IP with a DNS label for each VM
-            dns_label = f"vm-dns-{i+1}-{resource_group.lower()}"
+            dns_label = f"vm-dns-{i+1}-{vm.rg.lower()}"
             public_ip_params = {
-                "location": location,
+                "location": vm.location,
                 "sku": {"name": "Standard"},
                 "public_ip_allocation_method": "Static",
-                "dns_settings": {"domain_name_label": dns_label}  # DNS settings added here
+                "dns_settings": {"domain_name_label": dns_label}  
             }
             public_ip = network_client.public_ip_addresses.begin_create_or_update(
-                resource_group,
+                vm.rg,
                 f"myPublicIP-{i+1}",
                 public_ip_params
             ).result()
 
-            # Retrieve the fully qualified domain name (FQDN) after creation
+            # Retrieve the domain name after creating
             fqdn = public_ip.dns_settings.fqdn
 
-            # Create unique Network Interface with NSG for each VM
+            # Network Interface with NSG for each VM
             nic_name = f"myNic-{i+1}"
             nic_params = {
-                "location": location,
+                "location": vm.location,
                 "ip_configurations": [{
                     "name": f"myIpConfig-{i+1}",
                     "subnet": {"id": subnet.id},
@@ -122,15 +121,15 @@ async def create_vms(vm_count: int, resource_group: str, location: str, vm_size:
                 "network_security_group": {"id": nsg.id}
             }
             nic = network_client.network_interfaces.begin_create_or_update(
-                resource_group,
+                vm.rg,
                 nic_name,
                 nic_params
             ).result()
 
-            # Step 5: Create the VM with the unique NIC and Public IP
+            #Create the VM with the unique NIC and Public IP
             vm_params = {
-                "location": location,
-                "hardware_profile": {"vm_size": vm_size},
+                "location": vm.location,
+                "hardware_profile": {"vm_size": vm.vm_size},
                 "storage_profile": {
                     "image_reference": {
                         "publisher": "Canonical",
@@ -141,8 +140,8 @@ async def create_vms(vm_count: int, resource_group: str, location: str, vm_size:
                 },
                 "os_profile": {
                     "computer_name": vm_name,
-                    "admin_username": username,
-                    "admin_password": password
+                    "admin_username": vm.username,
+                    "admin_password": vm.password
                 },
                 "network_profile": {
                     "network_interfaces": [{"id": nic.id}]
@@ -150,28 +149,30 @@ async def create_vms(vm_count: int, resource_group: str, location: str, vm_size:
             }
 
             compute_client.virtual_machines.begin_create_or_update(
-                resource_group,
+                vm.rg,
                 vm_name,
                 vm_params
             ).result()
 
-            # Store the VM name, public IP, and FQDN
+            # Storing and returning the data
             vm_ips.append({"vm_name": vm_name, "public_ip": public_ip.ip_address, "dns_name": fqdn})
 
-        return {"status": f"{vm_count} VMs created successfully with NSG and open ports", "vm_ips": vm_ips}
+        return {"status": f"{vm.vm_count} VMs created successfully with NSG and open ports", "vm_ips": vm_ips}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to create VMs: {str(e)}")
 
 
 
+
+
     
-def install_k3s_on_primary_node(ip_address, username, password):
-    # SSH into the node and install k3s
+def install_k3s_on_primary_node(vm):
+    # SSH into the node
     client = paramiko.SSHClient()
     client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-    client.connect(ip_address, username=username, password=password)
+    client.connect(vm.ip_address, username= vm.username, password= vm.password)
 
-    # K3s install command with embedded etcd for HA
+    # install k3s
     install_command = "curl -sfL https://get.k3s.io | sh -s - server --cluster-init --write-kubeconfig-mode 644"
     stdin, stdout, stderr = client.exec_command(install_command)
     print(stdout.read().decode())
@@ -191,20 +192,25 @@ def install_k3s_on_primary_node(ip_address, username, password):
     return token
 
 @app.post("/setup-k3s-primary")
-async def setup_k3s_primary(ip_address: str, username: str, password: str):
+async def setup_k3s_primary(vm = Depends(ipinput)):
     try:
-        token = install_k3s_on_primary_node(ip_address, username, password)
+        token = install_k3s_on_primary_node(vm)
         return {"status": "K3s installed on primary node", "token": token}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to set up K3s on primary node: {str(e)}")
 
-def join_k3s_secondary_node(ip_address, username, password, token, server_ip):
+
+
+
+
+
+def join_k3s_secondary_node(vm):
     client = paramiko.SSHClient()
     client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-    client.connect(ip_address, username=username, password=password)
+    client.connect(vm.ip_address, username = vm.username, password = vm.password)
 
     # K3s agent join command
-    join_command = f"curl -sfL https://get.k3s.io | K3S_URL=https://{server_ip}:6443 K3S_TOKEN={token} sh -s -"
+    join_command = f"curl -sfL https://get.k3s.io | K3S_URL=https://{vm.server_ip}:6443 K3S_TOKEN={vm.token} sh -s -"
 
     stdin, stdout, stderr = client.exec_command(join_command)
     print(stdout.read().decode())
@@ -212,18 +218,23 @@ def join_k3s_secondary_node(ip_address, username, password, token, server_ip):
     client.close()
 
 @app.post("/join-k3s-node")
-async def join_k3s_node(ip_address: str, username: str, password: str, token: str, server_ip: str):
+async def join_k3s_node(vm = Depends(joinNode)):
     try:
-        join_k3s_secondary_node(ip_address, username, password, token, server_ip)
+        join_k3s_secondary_node(vm)
         return {"status": "Node joined to K3s cluster"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to join node to K3s cluster: {str(e)}")
 
+
+
+
+
+
 # Add an endpoint to install Helm on the primary node.
-def install_helm_on_node(ip_address, username, password):
+def install_helm_on_node(vm):
     client = paramiko.SSHClient()
     client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-    client.connect(ip_address, username=username, password=password)
+    client.connect(vm.ip_address, username = vm.username, password = vm.password)
 
     # Command to install Helm
     helm_install_command = """
@@ -236,9 +247,9 @@ def install_helm_on_node(ip_address, username, password):
     client.close()
 
 @app.post("/install-helm")
-async def install_helm(ip_address: str, username: str, password: str):
+async def install_helm(vm = Depends(ipinput)):
     try:
-        install_helm_on_node(ip_address, username, password)
+        install_helm_on_node(vm)
         return {"status": "Helm installed on node"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to install Helm on node: {str(e)}")
@@ -301,31 +312,27 @@ async def install_helm(ip_address: str, username: str, password: str):
 #         raise HTTPException(status_code=500, detail=f"Failed to deploy CloudNativePG: {str(e)}")
 
 @app.post("/Clone-helm-chart/")
-def clone_helm_chart(ip_address: str, username: str, password: str):
+def clone_helm_chart(vm = Depends(ipinput)):
     try:
         # Establish SSH connection
         client = paramiko.SSHClient()
         client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-        client.connect(ip_address, username=username, password=password)
+        client.connect(vm.ip_address, username = vm.username, password = vm.password)
 
-        # Commands to execute
-        commands = [
-            "git clone https://github.com/Hemanth097/postgre-chart",           
-        ]
+        # Cloning repo
+        command = ("git clone https://github.com/vamsimalle1790/outpostplsql")    
+        
 
         # Execute each command and capture the output
-        for command in commands:
-            stdin, stdout, stderr = client.exec_command(command)
-            stdout_output = stdout.read().decode()
-            stderr_output = stderr.read().decode()
+        
+        stdin, stdout, stderr = client.exec_command(command)
+        stdout_output = stdout.read().decode()
+        stderr_output = stderr.read().decode()
 
-            # Print outputs in the console
-            print(f"Command: {command}")
-            print(f"STDOUT:\n{stdout_output}")
-            print(f"STDERR:\n{stderr_output}")
-
-            # if stderr_output:
-            #     raise Exception(f"Error executing {command}: {stderr_output}")
+        # Print outputs in the console
+        print(f"Command: {command}")
+        print(f"STDOUT:\n{stdout_output}")
+        print(f"STDERR:\n{stderr_output}")
 
         # Close the connection
         client.close()  
@@ -335,46 +342,32 @@ def clone_helm_chart(ip_address: str, username: str, password: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/deploy-postgres/")
-async def deploy_postgres(
-    ip_address: str,
-    username: str,
-    password: str,
-    user_name: str,
-    db_name: str,
-    db_password: str,
-    storage_size: str,
-    nodeport: str,
-    replica_count: int = 1,
-    autoscaling_enabled: bool = False,
-    min_replicas: int = 1,
-    max_replicas: int = 3,
-    cpu_utilization: int = 80,
-):
+async def deploy_postgres(vm = Depends(deploypg)):
     try:
         
 
         # Establish SSH connection
         client = paramiko.SSHClient()
         client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-        client.connect(ip_address, username=username, password=password)
+        client.connect(vm.ip_address, username = vm.username, password = vm.password)
 
         release_name = "postgres-chart"
-        helm_chart_path = "./postgre-chart/postgres-chart-0.1.0.tgz"
+        helm_chart_path = "./outpostplsql/postgres-chart-0.1.0.tgz"
 
         # Build Helm command with --set for dynamic values
         helm_command = (
             f"helm install {release_name} {helm_chart_path} "
-            f"--set replicaCount={replica_count} "
-            f"--set postgres.user={user_name} "
-            f"--set postgres.password={db_password} "
-            f"--set postgres.db={db_name} "
-            f"--set postgres.storage.size={storage_size} "
-            f"--set postgres.nodePort={nodeport} "
+            f"--set replicaCount={vm.replica_count} "
+            f"--set postgres.user={vm.user_name} "
+            f"--set postgres.password={vm.db_password} "
+            f"--set postgres.db={vm.db_name} "
+            f"--set postgres.storage.size={vm.storage_size} "
+            f"--set postgres.nodePort={vm.nodeport} "
             f"--set service.type=NodePort "
-            f"--set autoscaling.enabled={str(autoscaling_enabled).lower()} "
-            f"--set autoscaling.minReplicas={min_replicas} "
-            f"--set autoscaling.maxReplicas={max_replicas} "
-            f"--set autoscaling.targetCPUUtilizationPercentage={cpu_utilization}"
+            f"--set autoscaling.enabled={str(vm.autoscaling_enabled).lower()} "
+            f"--set autoscaling.minReplicas={vm.min_replicas} "
+            f"--set autoscaling.maxReplicas={vm.max_replicas} "
+            f"--set autoscaling.targetCPUUtilizationPercentage={vm.cpu_utilization}"
         )
 
         # Single command to set KUBECONFIG and execute Helm
@@ -459,44 +452,44 @@ async def deploy_postgres(
 #     except Exception as e:
 #         raise HTTPException(status_code=500, detail=str(e))
     
-    def execute_ssh_command(ip: str, username: str, password: str, commands: list):
-        """Execute commands on a remote server via SSH."""
-        try:
-            ssh = paramiko.SSHClient()
-            ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-            ssh.connect(hostname=ip, username=username, password=password)
-            for command in commands:
-                stdin, stdout, stderr = ssh.exec_command("export KUBECONFIG=/etc/rancher/k3s/k3s.yaml && "+ command)
-                stdout.channel.recv_exit_status()  # Wait for command to finish
-                output = stdout.read().decode()
-                error = stderr.read().decode()
-                print("stdout\n", output)
-                print("error\n",error)
-                # if error:
-                #     raise Exception(f"Error executing command: {error}")
-            ssh.close()
-            return output
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=str(e))
+def execute_ssh_command(ip: str, username: str, password: str, commands: list):
+    """Execute commands on a remote server via SSH."""
+    try:
+        ssh = paramiko.SSHClient()
+        ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        ssh.connect(hostname=ip, username=username, password=password)
+        for command in commands:
+            stdin, stdout, stderr = ssh.exec_command("export KUBECONFIG=/etc/rancher/k3s/k3s.yaml && "+ command)
+            stdout.channel.recv_exit_status()  # Wait for command to finish
+            output = stdout.read().decode()
+            error = stderr.read().decode()
+            print("stdout\n", output)
+            print("error\n",error)
+            # if error:
+            #     raise Exception(f"Error executing command: {error}")
+        ssh.close()
+        return output
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
-    @app.post("/install-monitoring/")
-    def install_monitoring(ip: str, username: str, password: str):
-        """Install Prometheus and Grafana on the remote VM."""
-        commands = [
-            "helm repo add prometheus-community https://prometheus-community.github.io/helm-charts && helm repo update",
-            "helm repo add grafana https://grafana.github.io/helm-charts && helm repo update",
-            # Install Prometheus
-            "helm install prometheus prometheus-community/kube-prometheus-stack --namespace monitoring --create-namespace",
-            # Install Grafana
-            "helm install grafana grafana/grafana --namespace monitoring",
-            # Change Grafana to NodePort
-            "kubectl -n monitoring patch svc grafana --type='json' -p '[{\"op\":\"replace\",\"path\":\"/spec/type\",\"value\":\"NodePort\"}]'"
-        ]
-        
-        # Execute the commands on the remote VM
-        try:
-            result = execute_ssh_command(ip, username, password, commands)
-            return {"message": "Prometheus and Grafana installed successfully.", "details": result}
-        except HTTPException as e:
-            return {"error": e.detail}
-        #
+@app.post("/install-monitoring/")
+def install_monitoring(ip: str, username: str, password: str):
+    """Install Prometheus and Grafana on the remote VM."""
+    commands = [
+        "helm repo add prometheus-community https://prometheus-community.github.io/helm-charts && helm repo update",
+        "helm repo add grafana https://grafana.github.io/helm-charts && helm repo update",
+        # Install Prometheus
+        "helm install prometheus prometheus-community/kube-prometheus-stack --namespace monitoring --create-namespace",
+        # Install Grafana
+        "helm install grafana grafana/grafana --namespace monitoring",
+        # Change Grafana to NodePort
+        "kubectl -n monitoring patch svc grafana --type='json' -p '[{\"op\":\"replace\",\"path\":\"/spec/type\",\"value\":\"NodePort\"}]'"
+    ]
+    
+    # Execute the commands on the remote VM
+    try:
+        result = execute_ssh_command(ip, username, password, commands)
+        return {"message": "Prometheus and Grafana installed successfully.", "details": result}
+    except HTTPException as e:
+        return {"error": e.detail}
+    #
