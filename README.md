@@ -245,4 +245,4 @@ pydantic :validations
 
 Architecture Diagram
 =======================
-![alt text](<WhatsApp Image 2024-11-22 at 19.18.37_9151feda-1.jpg>)
+![alt text](<Architecture_Diagram.jpg>)
