@@ -493,8 +493,8 @@ def install_monitoring(vm = Depends(ipinput)):
     except HTTPException as e:
         return {"error": e.detail}
 
-@app.post("/get-promethues-password/")
-def gwt_promethues_password(vm = Depends(ipinput)):
+@app.post("/get-grafana-password/")
+def get_grafana_password(vm = Depends(ipinput)):
     try:
         # Establish SSH connection
         client = paramiko.SSHClient()
@@ -502,7 +502,7 @@ def gwt_promethues_password(vm = Depends(ipinput)):
         client.connect(vm.ip_address, username = vm.username, password = vm.password)
 
         # Cloning repo
-        command = ("kubectl get secret --namespace monitoring grafana -o jsonpath="{.data.admin-password}"")    
+        command = ("kubectl get secret --namespace monitoring grafana -o jsonpath="{.data.admin-password}" | base64 --decode ; echo")    
         
 
         # Execute each command and capture the output
