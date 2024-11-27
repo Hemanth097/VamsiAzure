@@ -492,4 +492,33 @@ def install_monitoring(vm = Depends(ipinput)):
         return {"message": "Prometheus and Grafana installed successfully.", "details": result}
     except HTTPException as e:
         return {"error": e.detail}
-    #
+
+@app.post("/get-promethues-password/")
+def gwt_promethues_password(vm = Depends(ipinput)):
+    try:
+        # Establish SSH connection
+        client = paramiko.SSHClient()
+        client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        client.connect(vm.ip_address, username = vm.username, password = vm.password)
+
+        # Cloning repo
+        command = ("kubectl get secret --namespace monitoring grafana -o jsonpath="{.data.admin-password}"")    
+        
+
+        # Execute each command and capture the output
+        
+        stdin, stdout, stderr = client.exec_command(command)
+        stdout_output = stdout.read().decode()
+        stderr_output = stderr.read().decode()
+
+        # Print outputs in the console
+        print(f"Command: {command}")
+        print(f"STDOUT:\n{stdout_output}")
+        print(f"STDERR:\n{stderr_output}")
+
+        # Close the connection
+        client.close()  
+
+        return {"status": "success", "password": stdout_output}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
