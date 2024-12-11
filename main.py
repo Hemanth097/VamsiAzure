@@ -6,6 +6,8 @@ from azure_config import compute_client, resource_client, network_client, subscr
 from pathlib import Path 
 from models import ipinput, vmcreation, joinNode, deploypg
 
+# everythings working
+
 
 app = FastAPI()
 
